@@ -16,6 +16,12 @@ def print_modules(user, passwd):
         print "Module name: %s, code: %s, semester: %s" % (module.module_name, \
                 module.module_code, module.semester)
 
+        cwk_tools = module.get_tools(MMSToolType.Coursework)
+        for cwk_tool in cwk_tools:
+            assignments = cwk_tool.get_assignments()
+            for assignment in assignments:
+                print assignment 
+
         print "Tools:"
         for tool in module.tools:
             print "Tool name: %s, Tool Type: %s, Tool URL: %s" % (tool.name, \
