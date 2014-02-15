@@ -129,8 +129,9 @@ class MMSFeedback(object):
         return self.__repr__().encode("utf-8", "ignore")
 
 class MMSAssignment(object):
-    def __init__(self, name, due_date, feedback_date, submitted_date, 
+    def __init__(self, id, name, due_date, feedback_date, submitted_date, 
             submission_url, feedback_urls, grade, weighting, chart_link, lib):
+        self.id = id
         self.name = name
         self.due_date = due_date
         self.feedback_date = feedback_date
@@ -143,6 +144,7 @@ class MMSAssignment(object):
 
     def __repr__(self):
         ret = ["------ Assignment %s -------" % self.name,
+        "ID: %s" % self.id,
         "Due date: %s" % time.strftime("%d %b %y, %H:%M", self.due_date),
         "Feedback date: %s" % time.strftime("%d %b %y", self.feedback_date)]
 
@@ -197,7 +199,7 @@ class MMSLib(object):
     # Attempts to log in. Throws an AuthenticationError if incorrect,
     # otherwise returns page shown upon successful login
     def _login(self, login_page):
-        print "logging in"
+        # print "logging in"
         # Get the required hidden metadata for the SSO system
         parsed_login = _parse_login(login_page)
         args = { "username" : self.user, "password": self.passwd, 
@@ -249,9 +251,10 @@ class MMSLib(object):
     # If academic_year is None, the current year is fetched.
     def get_modules(self, academic_year=None):
         # https://mms.st-andrews.ac.uk/mms/user/me/Modules?academic_year=2011%2F2
-        req_url = MMSLib.BASE_URL + "/mms/user/me/Modules" 
+        req_url = MMSLib.BASE_URL + "/mms/user/me/Modules?academic_year=" 
         if academic_year:
-            req_url = req_url + "?academic_year=" + academic_year
+            req_url = req_url + academic_year
+        req_url = req_url + "&unit=&command=Get+My+Modules"
         res = self._mms_get(req_url)
         modules = _parse_modules_list(res, self)
         return modules
@@ -388,7 +391,8 @@ def _parse_cwk(html, url, lib):
             weighting = None
 
         chart_link = children[8].a["href"]
-        assignment = MMSAssignment(name, due_date, feedback_date, \
+        id = int(children[9].input["value"])
+        assignment = MMSAssignment(id, name, due_date, feedback_date, \
                         submitted_date, file_url, feedback, grade, \
                         weighting, chart_link, lib)
         ret.append(assignment)
