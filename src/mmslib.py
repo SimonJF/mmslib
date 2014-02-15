@@ -4,10 +4,12 @@
 # so it was probably best to start again.
 # Also, interesting to get my head out of functional-land every once in a while :)
 from bs4 import BeautifulSoup
+import htmllib
 import re
 import requests
 import time
-
+import json
+import sys
 # Exceptions:
 # ImproperUseError is thrown when the library isn't used properly.
 class ImproperUseError(Exception):
@@ -90,7 +92,7 @@ class MMSCourseworkTool(MMSTool):
 
     def get_assignments(self):
         cwk_page = self.lib._mms_get(self.url)
-        assignments = _parse_cwk(cwk_page, self.lib)
+        assignments = _parse_cwk(cwk_page, self.url, self.lib)
         return assignments
 
 # Representation of an MMS Module
@@ -106,17 +108,31 @@ class MMSModule(object):
             return self.tools
         return filter(lambda tool: tool.tool_type == tool_ty, self.tools)
 
+class MMSFeedback(object):
+    def __init__(self, name, date, content):
+        self.name = name
+        self.date = date
+        self.content = content
+
+    def __repr__(self):
+        str_date = time.strftime("%d %b %y, %H:%M", self.date)
+        return "Feedback from " + self.name + " on " + str_date + ": \n" \
+                 + self.content
+    def __str__(self):
+        return self.__repr__().encode("utf-8", "ignore")
+
 class MMSAssignment(object):
     def __init__(self, name, due_date, feedback_date, submitted_date, 
-            uploaded_file, comments, grade, weighting, chart_link):
+            uploaded_file, feedback_urls, grade, weighting, chart_link, lib):
         self.name = name
         self.due_date = due_date
         self.feedback_date = feedback_date
         self.submitted_date = submitted_date
         self.uploaded_file = uploaded_file
-        self.comments = comments
+        self._feedback_urls = feedback_urls
         self.grade = grade
         self.weighting = weighting
+        self._lib = lib
 
     def __repr__(self):
         ret = ["------ Assignment %s -------" % self.name,
@@ -129,9 +145,9 @@ class MMSAssignment(object):
             ret.append("Uploaded file URL: %s" % self.uploaded_file)
         else:
             ret.append("Not submitted")
-        ret.append("Comments: ")
-        for comment in self.comments:
-            ret.append("  %s" % comment)
+  #      ret.append("Comments: ")
+#        for comment in self.comments:
+ #           ret.append("  %s" % comment)
         if self.grade != None:
             ret.append("Grade: %f" % self.grade)
         else:
@@ -141,8 +157,14 @@ class MMSAssignment(object):
         else:
             ret.append("Not weighted")
 
-        return "\n".encode("utf_8", "ignore").join(ret)
+        return "\n".join(ret)
+    
+    def __str__(self):
+        return self.__repr__().encode("utf-8", "ignore")
         
+    def get_feedback(self):
+        return map(lambda x: _fetch_feedback(x, self._lib), self._feedback_urls)
+
 
 # Accesses are stateful, so we need a class to encapsulate this
 class MMSLib(object):
@@ -185,8 +207,13 @@ class MMSLib(object):
         resp = self.sess.get(req_url)
         if MMSLib.NOT_LOGGED_IN_TEXT in resp.text:
             return self._login(resp.text)
-        return resp.text
-        
+        ## RAWR!!!! >=[
+        # Unicode is being incredibly annoying, and I can't fix it. So ASCII
+        # for now. Sorry, languages students.
+        html = resp.text.encode("ascii", "ignore")
+        html = html.replace("&#160;", "")
+        # html = unescape(html)
+        return html
 
     # Gets a list of MMSModules.
     # If academic_year is None, the current year is fetched.
@@ -277,24 +304,13 @@ def is_float(test_str):
     except ValueError:
         return False
 
-def _parse_cwk(html, lib):
-    html = html.replace("&#160;", "")
+def _parse_cwk(html, url, lib):
     ret = []
     parser = BeautifulSoup(html)
     
     table = parser.find("tbody")
     entries = table.findAll("tr") # finds a list of all coursework elements
-#0   			<td >cw1</td>
-#1	due		<td >14 Mar 14, 23:59</td>
-#2  fdb		<td >28 Mar 14</td>
-#3	file	<td ><input type="file" name="file_156081" id="file_156081" />
-#
-#4	sub		<td >&#160;</td>
-#5	fdb		<td >
-#6	grd		<td >&#160;</td>
-#7	wgt		<td >50 %</td>
-#8	cht		<td ><a href="Graph?assignment=156081">Chart</a></td>
-#	chk		<td ><input type="checkbox" name="assignment" value="156081" /> 
+    
     for entry in entries:
         children = entry.findAll("td") # enumerates all attributes
         name = children[0].contents[0]
@@ -318,7 +334,7 @@ def _parse_cwk(html, lib):
         else:
             submitted_date = None
 
-        feedback = _parse_cwk_feedback_field(children[5])
+        feedback = _parse_cwk_feedback_field(children[5], url)
         
         # Parse grade
         grade = None
@@ -340,16 +356,39 @@ def _parse_cwk(html, lib):
 
         chart_link = children[8].a["href"]
         assignment = MMSAssignment(name, due_date, feedback_date, \
-                        submitted_date, file_url, feedback, grade, weighting, chart_link)
+                        submitted_date, file_url, feedback, grade, \
+                        weighting, chart_link, lib)
         ret.append(assignment)
     return ret
 
-# TODO: Really, should evaluate this eagerly and fetch feedback
-def _parse_cwk_feedback_field(dom_element):
+# The feedback field gives us a URL to the feedback. Adding the parameter
+# template_format=application/json gives us the data in a nice JSON format to use.
+# Best way to do it, IMO, is to store a list of URLs and retrieve the feedback
+# when required, instead of doing all the requests (keep in mind this might be ~10
+# for modules such as RPIC / CS1002)
+def _parse_cwk_feedback_field(dom_element, url):
     feedback_entries = []
     ul_element = dom_element.find("ul", {"class" : "horizontal"})
     for feedback_element in ul_element.find_all("li"):
-#        print "feedback elem", feedback_element.contents[0]
-        feedback_entries.append(feedback_element.contents[0])
+        if feedback_element.a != None and \
+                feedback_element.a.contents[0] != "[Add Comment]":
+            feedback_entries.append(url + feedback_element.a["href"] + \
+                    "&template_format=application/json")
     return feedback_entries
+
+# Woo, if only all of MMS had a JSON API! Would make my life easier :)
+def _fetch_feedback(feedback_url, lib):
+    json_data = lib._mms_get(feedback_url)
+    # FIXME: Some characters (ie ') are escaped, but refuse to decode. For now,
+    # I'm simply escaping the escape char, but this is less than elegant...
+    feedback_data = json.loads(json_data.replace("\\", "\\\\"))
+    date = time.strptime(feedback_data["feedback_date"], "%d/%m/%Y %H:%M")
+    return MMSFeedback(feedback_data["sender_name"], date, \
+            feedback_data["comment"])
+
+def unescape(s):
+    p = htmllib.HTMLParser(None)
+    p.save_bgn()
+    p.feed(s)
+    return p.save_end()
 

@@ -21,6 +21,10 @@ def print_modules(user, passwd):
             assignments = cwk_tool.get_assignments()
             for assignment in assignments:
                 print assignment 
+                feedback = assignment.get_feedback()
+                for feedback_entry in feedback:
+                    print "------ Feedback ------"
+                    print feedback
 
         print "Tools:"
         for tool in module.tools:
