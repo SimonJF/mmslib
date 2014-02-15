@@ -34,6 +34,13 @@ class ToolNotAvailableError(Exception):
     def __repr__(self):
         return self.msg
 
+class CourseworkNotAvailableError(Exception):
+    def __init__(self):
+        Exception.__init__(self)
+
+    def __repr__(self):
+        return "No coursework to download!"
+
 # MMS Tools (at least the student ones. I'm not staff. If you're reading this,
 # Tristan, patches welcome ;))
 # TODO: Python 2 doesn't have enums... There must be a nicer way of doing this
@@ -123,12 +130,12 @@ class MMSFeedback(object):
 
 class MMSAssignment(object):
     def __init__(self, name, due_date, feedback_date, submitted_date, 
-            uploaded_file, feedback_urls, grade, weighting, chart_link, lib):
+            submission_url, feedback_urls, grade, weighting, chart_link, lib):
         self.name = name
         self.due_date = due_date
         self.feedback_date = feedback_date
         self.submitted_date = submitted_date
-        self.uploaded_file = uploaded_file
+        self.submission_url = submission_url
         self._feedback_urls = feedback_urls
         self.grade = grade
         self.weighting = weighting
@@ -142,7 +149,7 @@ class MMSAssignment(object):
         if self.submitted_date != None:
             ret.append( "Submitted date: %s" % \
                     time.strftime("%d %b %y, %H:%M", self.submitted_date))
-            ret.append("Uploaded file URL: %s" % self.uploaded_file)
+            ret.append("Uploaded file URL: %s" % self.submission_url)
         else:
             ret.append("Not submitted")
   #      ret.append("Comments: ")
@@ -165,6 +172,10 @@ class MMSAssignment(object):
     def get_feedback(self):
         return map(lambda x: _fetch_feedback(x, self._lib), self._feedback_urls)
 
+    def download_submission(self):
+        if self.submission_url == None:
+            raise CourseworkNotAvailableError
+        return self._lib._mms_download(self.submission_url)
 
 # Accesses are stateful, so we need a class to encapsulate this
 class MMSLib(object):
@@ -214,6 +225,25 @@ class MMSLib(object):
         html = html.replace("&#160;", "")
         # html = unescape(html)
         return html
+
+    # Stolen from...
+    # http://stackoverflow.com/questions/16694907/
+    #   how-to-download-large-file-in-python-with-requests-py
+    def _mms_download(self, url):
+        # Default to the filename...
+        local_filename = url.split('/')[-1]
+        r = self.sess.get(url, stream=True)
+        # But if we can, get the nice name instead :)
+        print r.headers
+        if "content-disposition" in r.headers:
+            content_disp = r.headers.get("content-disposition")
+            local_filename = content_disp.split("filename=")[1].replace("\"","")
+
+        with open(local_filename, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=1024): 
+                if chunk: # filter out keep-alive new chunks
+                    f.write(chunk)
+                    f.flush()
 
     # Gets a list of MMSModules.
     # If academic_year is None, the current year is fetched.
@@ -322,7 +352,10 @@ def _parse_cwk(html, url, lib):
         # Parse feedback date
         feedback_date_str = children[2].contents[0]
         feedback_date = time.strptime(feedback_date_str, "%d %b %y")
-        file_url = None  # children[3].contents[0]
+        file_url_field = children[3]
+        file_url = None
+        if file_url_field.a != None:
+            file_url = url + file_url_field.a["href"]
         # 30 Sep 10, 23:59
         # Parse submission date. Not always present...
         if len(children[4].contents) > 0:
