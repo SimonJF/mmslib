@@ -258,7 +258,7 @@ class MMSLib(object):
         modules = _parse_modules_list(res, self)
         return modules
 
-def get_module(self, academic_year, module_code):
+    def get_module(self, academic_year, module_code):
         # TODO. Will require going to module page, and translating
         # from textual reps of tools to actual tools, parsing a different table 
         pass
