@@ -295,7 +295,7 @@ def _parse_modules_list(html, lib):
 def _parse_module_tools(dom_entry, lib):
     tools = []
     section = dom_entry.next_sibling.next_sibling # 2x nextSibling. why? beats me.
-    tool_section = section.find("ul", { "class", "module_resources"})
+    tool_section = section.find("ul", { "class" : "module_resources"})
     if tool_section:
         tool_links = tool_section.find_all("a")
         for tool_link in tool_links:
