@@ -25,9 +25,10 @@ class PersistentCoursework(object):
     @staticmethod
     def create_from_assignment(mms_assignment):
         feedback = map(lambda x: str(x), mms_assignment.get_feedback())
-        PersistentCoursework(mms_assignment.id, mms_assignment.name, \
+        ret = PersistentCoursework(mms_assignment.id, mms_assignment.name, \
                 mms_assignment.due_date, mms_assignment.feedback_date, \
                 feedback, mms_assignment.grade)
+        return ret
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
@@ -53,13 +54,11 @@ def get_persistent_key(cwk_tool):
     return m.hexdigest()
 
 # Populates the store for a given tool
-def populate_store(assignments, store, key):
+def populate_store(persistent_assignments, store, key):
     assignment_dict = {}
-    for assignment in assignments:
+    for persistent_assignment in persistent_assignments:
         # Create a persistent assignment instance, and store it
-        persistent_assignment = \
-                PersistentCoursework.create_from_assignment(assignment)
-        assignment_dict[persistent_assignment.id] = persistent_assignment
+        assignment_dict[str(persistent_assignment.id)] = persistent_assignment
     store[key] = assignment_dict
 
 
@@ -70,23 +69,27 @@ def check_cwk(lib, cwk_tool, store):
     key = get_persistent_key(cwk_tool)
     assignments = cwk_tool.get_assignments()
     persistent_assignments = \
-            map(lambda x: PersistentCoursework.create_from_assignment(x), \
-                assignments)
+        [PersistentCoursework.create_from_assignment(x) for x in assignments]
+
     # If it's not in there, populate it, and don't notify the user.
     if key not in store:
-        populate_store(assignments, store, key)
-        return
+        populate_store(persistent_assignments, store, key)
+        return [] # Don't return anything, so the user's not notified on first run
+
     # If it is, we can get a list of diffs, and email them.
     diffs = []
     assignment_dict = store[key]
     for assignment in assignments:
-        if assignment.id in assignment_dict:
+        persistent_assignment = \
+                PersistentCoursework.create_from_assignment(assignment)
+        assignment_key = str(assignment.id)
+        if assignment_key in assignment_dict:
             # Check whether they're the same, if not, add to diffs.
-            if assignment != store[assignment.id]:
-                assignment_dict[assignment.id] = assignment
+            if persistent_assignment != assignment_dict[assignment_key]:
+                assignment_dict[assignment_key] = persistent_assignment
                 diffs.append(assignment)
         else: # If the cwk isn't in there, add it. Also add to diffs.
-            assignment_dict[assignment.id] = assignment
+            assignment_dict[assignment_key] = persistent_assignment
             diffs.append(assignment)
     # Finally, persist the updated assignment store and return diffs
     store[key] = assignment_dict
@@ -98,7 +101,7 @@ def generate_msg_body(diffs):
     for module_code, module_diffs in diffs.iteritems():
         ret = ret + "Module " + module_code + ":\r\n"
         for cwk_toolname, cwk_diffs in module_diffs.iteritems():
-            ret = "Coursework tool name: " + cwk_toolname + "\r\n"
+            ret = ret + "Coursework tool name: " + cwk_toolname + "\r\n"
             for cwk_diff in cwk_diffs:
                 ret = ret + str(cwk_diff)  + "\r\n\r\n"
     return ret
@@ -108,7 +111,7 @@ def email_diffs(diffs, email_address):
     msg = ("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n" % (email_address, \
             email_address, SUBJECT_LINE)) + msg_body
     s = smtplib.SMTP('localhost')
-    s.sendmail(msg_from, [msg_to], msg)
+    s.sendmail(email_address, [email_address], msg)
     s.quit()
 
 def main():
@@ -117,7 +120,7 @@ def main():
         print "Error: mmspider.conf does not exist!"
         sys.exit(-1)
     (user, passwd, email) = parse_config()
-    
+
     # Secondly, create a library instance, and get all the coursework tools
     try:
         lib = MMSLib(user, passwd)
@@ -133,10 +136,11 @@ def main():
         module_diffs = {}
         for cwk_tool in cwk_tools:
             cwk_diffs = check_cwk(lib, cwk_tool, store)
-            if len(diffs) > 0:
+            if (len(cwk_diffs) > 0):
                 module_diffs[cwk_tool.name] = cwk_diffs
-                
-        diffs[module.module_code] = module_diffs
+
+        if (len(module_diffs) > 0):
+            diffs[module.module_code] = module_diffs
 
     store.close()
     # Email the diffs if we need to, and we're done!

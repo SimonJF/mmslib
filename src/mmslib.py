@@ -83,7 +83,7 @@ class MMSToolType(object):
             return "Signup"
         elif tool_type == MMSToolType.URL:
             return "URL"
-        else: 
+        else:
             return "Invalid Tool"
 
 class MMSTool(object):
@@ -129,7 +129,7 @@ class MMSFeedback(object):
         return self.__repr__().encode("utf-8", "ignore")
 
 class MMSAssignment(object):
-    def __init__(self, id, name, due_date, feedback_date, submitted_date, 
+    def __init__(self, id, name, due_date, feedback_date, submitted_date,
             submission_url, feedback_urls, grade, weighting, chart_link, lib):
         self.id = id
         self.name = name
@@ -167,10 +167,10 @@ class MMSAssignment(object):
             ret.append("Not weighted")
 
         return "\n".join(ret)
-    
+
     def __str__(self):
         return self.__repr__().encode("utf-8", "ignore")
-        
+
     def get_feedback(self):
         return map(lambda x: _fetch_feedback(x, self._lib), self._feedback_urls)
 
@@ -202,17 +202,16 @@ class MMSLib(object):
         # print "logging in"
         # Get the required hidden metadata for the SSO system
         parsed_login = _parse_login(login_page)
-        args = { "username" : self.user, "password": self.passwd, 
+        args = { "username" : self.user, "password": self.passwd,
                  "lt" : parsed_login["lt"], "_eventId" : parsed_login["eventid"] }
 
         # Make the login request
         req_url = MMSLib.LOGIN_URL + "/" + parsed_login["dest"]
         resp = self.sess.post(req_url, data=args)
-        
+
         # If login failure, then throw an error
         if MMSLib.INCORRECT_TEXT in resp.text:
             raise AuthenticationError()
-        
         return resp.text
 
     # Stateful get access, handles login if necessary
@@ -236,7 +235,7 @@ class MMSLib(object):
         local_filename = url.split('/')[-1]
         r = self.sess.get(url, stream=True)
         # But if we can, get the nice name instead :)
-        print r.headers
+        #print r.headers
         if "content-disposition" in r.headers:
             content_disp = r.headers.get("content-disposition")
             local_filename = content_disp.split("filename=")[1].replace("\"","")
@@ -258,19 +257,19 @@ class MMSLib(object):
         res = self._mms_get(req_url)
         modules = _parse_modules_list(res, self)
         return modules
-        
-    def get_module(self, academic_year, module_code):
+
+def get_module(self, academic_year, module_code):
         # TODO. Will require going to module page, and translating
         # from textual reps of tools to actual tools, parsing a different table 
         pass
 
-    
+
 
 def _parse_modules_list(html, lib):
     """ Given a module overview page, parses the page into a list of MMSModules """
     ret = []
     parser = BeautifulSoup(html)
-    
+
     modules_entries = parser.findAll("h3", { "class" : "module_heading" })
     for entry in modules_entries: # enumerates all modules
         # Get link, which gives us easy access to reasonably juicy info
@@ -316,10 +315,9 @@ def _parse_module_tools(dom_entry, lib):
     return tools
 
 def _parse_login(html):
-    """Parses the login page. Returns a dictionary of the form { id : form id, 
+    """Parses the login page. Returns a dictionary of the form { id : form id,
     dest : destination url, lt : lt hidden value, eventid : eventId hidden value}."""
     parser = BeautifulSoup(html)
-     
     # Extracts required information from the page
     form = parser.find("form")
     id = form["id"]
@@ -340,17 +338,16 @@ def is_float(test_str):
 def _parse_cwk(html, url, lib):
     ret = []
     parser = BeautifulSoup(html)
-    
     table = parser.find("tbody")
     entries = table.findAll("tr") # finds a list of all coursework elements
-    
+
     for entry in entries:
         children = entry.findAll("td") # enumerates all attributes
         name = children[0].contents[0]
         # 30 Sep 10, 23:59
         due_date_str = children[1].contents[0]
         due_date = time.strptime(due_date_str, "%d %b %y, %H:%M")
- 
+
         # 07 Oct 10
         # Parse feedback date
         feedback_date_str = children[2].contents[0]
@@ -371,14 +368,14 @@ def _parse_cwk(html, url, lib):
             submitted_date = None
 
         feedback = _parse_cwk_feedback_field(children[5], url)
-        
+
         # Parse grade
         grade = None
         if len(children[6].contents) > 0:
             grade_str = children[6].contents[0]
             if is_float(grade_str):
                 grade = float(grade_str)
-        
+
         # Parse weighting
         weighting_str = children[7].contents[0]
         weighting = None
@@ -392,9 +389,10 @@ def _parse_cwk(html, url, lib):
 
         chart_link = children[8].a["href"]
         id = int(children[9].input["value"])
-        assignment = MMSAssignment(id, name, due_date, feedback_date, \
+        assignment = MMSAssignment(id, str(name), due_date, feedback_date, \
                         submitted_date, file_url, feedback, grade, \
-                        weighting, chart_link, lib)
+                        weighting, str(chart_link), lib)
+        #print assignment
         ret.append(assignment)
     return ret
 
@@ -416,9 +414,18 @@ def _parse_cwk_feedback_field(dom_element, url):
 # Woo, if only all of MMS had a JSON API! Would make my life easier :)
 def _fetch_feedback(feedback_url, lib):
     json_data = lib._mms_get(feedback_url)
-    # FIXME: Some characters (ie ') are escaped, but refuse to decode. For now,
-    # I'm simply escaping the escape char, but this is less than elegant...
-    feedback_data = json.loads(json_data.replace("\\", "\\\\"))
+    # The JSON passed back from MMS isn't valid JSON. Boo.
+    # Some characters are escaped with \ when they shouldn't be. When things
+    # *are* escaped, they're only escaped with one backslash.
+    # Nightmare. This is a hack, because I hate dealing with this mess and my
+    # original regex didn't work. Even though it was correct. Gah.
+    formatted_json = json_data.replace("\\\"", "<<quote>>")
+    formatted_json = formatted_json.replace("\\", "\\\\")
+    formatted_json = formatted_json.replace("<<quote>>", "\\\"")
+
+    #print formatted_json
+    feedback_data = json.loads(formatted_json)
+    #feedback_data = json.loads(json_data)
     date = time.strptime(feedback_data["feedback_date"], "%d/%m/%Y %H:%M")
     return MMSFeedback(feedback_data["sender_name"], date, \
             feedback_data["comment"])
