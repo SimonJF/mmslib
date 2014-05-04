@@ -10,8 +10,8 @@ import os.path
 CONF_FILE = "mmspider.conf"
 STORE_NAME = "mmspider.dat"
 SUBJECT_LINE = "MMSpider Alert: Coursework has changed"
-MSG_TEXT = "MMSpider has detected a change for some elements of coursework. \
-        These are detailed below."
+MSG_TEXT = "MMSpider has detected a change for some elements of coursework. " + \
+        "These are detailed below."
 
 class PersistentCoursework(object):
     def __init__(self, id, name, due_date, feedback_date, feedback, grade):
@@ -95,6 +95,14 @@ def check_cwk(lib, cwk_tool, store):
     store[key] = assignment_dict
     return diffs
 
+# Given an assignment, generates the string representation
+# to put in the email
+def generate_cwk_str(diff):
+    ret = str(diff) + "\r\n"
+    feedback = diff.get_feedback()
+    for feedback_entry in feedback:
+        ret = ret + str(feedback_entry) + "\r\n"
+    return ret
 
 def generate_msg_body(diffs):
     ret = MSG_TEXT + "\r\n"
@@ -103,7 +111,7 @@ def generate_msg_body(diffs):
         for cwk_toolname, cwk_diffs in module_diffs.iteritems():
             ret = ret + "Coursework tool name: " + cwk_toolname + "\r\n"
             for cwk_diff in cwk_diffs:
-                ret = ret + str(cwk_diff)  + "\r\n\r\n"
+                ret = ret + generate_cwk_str(cwk_diff) + "\r\n"
     return ret
 
 def email_diffs(diffs, email_address):
