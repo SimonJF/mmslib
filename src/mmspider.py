@@ -137,7 +137,7 @@ def main():
         sys.exit(-1)
 
     store = shelve.open(STORE_NAME)
-    modules = lib.get_modules(academic_year="2011_2")
+    modules = lib.get_modules()
     diffs = {}
     for module in modules:
         cwk_tools = module.get_tools(MMSToolType.Coursework)
