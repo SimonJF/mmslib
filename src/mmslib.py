@@ -10,6 +10,7 @@ import requests
 import time
 import json
 import sys
+import urllib
 # Exceptions:
 # ImproperUseError is thrown when the library isn't used properly.
 class ImproperUseError(Exception):
@@ -116,15 +117,21 @@ class MMSModule(object):
         return filter(lambda tool: tool.tool_type == tool_ty, self.tools)
 
 class MMSFeedback(object):
-    def __init__(self, name, date, content):
+    def __init__(self, name, date, content, file_url):
         self.name = name
         self.date = date
         self.content = content
+        self.file_url = file_url
 
     def __repr__(self):
         str_date = time.strftime("%d %b %y, %H:%M", self.date)
-        return "Feedback from " + self.name + " on " + str_date + ": \n" \
-                 + self.content
+        ret = "Feedback from " + self.name + " on " + str_date + ": \n"
+        if self.file_url != None: 
+            ret = ret + "Feedback file URL: " + self.file_url
+        if self.content != None:
+            ret = ret + self.content
+        return ret
+
     def __str__(self):
         return self.__repr__().encode("utf-8", "ignore")
 
@@ -251,8 +258,10 @@ class MMSLib(object):
     def get_modules(self, academic_year=None):
         # https://mms.st-andrews.ac.uk/mms/user/me/Modules?academic_year=2011%2F2
         req_url = MMSLib.BASE_URL + "/mms/user/me/Modules?academic_year=" 
-        if academic_year:
+        if academic_year != None:
+            academic_year = academic_year.replace("_", "%2F")
             req_url = req_url + academic_year
+
         req_url = req_url + "&unit=&command=Get+My+Modules"
         res = self._mms_get(req_url)
         modules = _parse_modules_list(res, self)
@@ -387,11 +396,15 @@ def _parse_cwk(html, url, lib):
         except ValueError:
             weighting = None
 
-        chart_link = children[8].a["href"]
+        # Parse chart link. Some modules might not have charts enabled...
+        chart_link = None
+        if children[8].a != None:
+            chart_link = str(children[8].a["href"])
+
         id = int(children[9].input["value"])
         assignment = MMSAssignment(id, str(name), due_date, feedback_date, \
                         submitted_date, file_url, feedback, grade, \
-                        weighting, str(chart_link), lib)
+                        weighting, chart_link, lib)
         #print assignment
         ret.append(assignment)
     return ret
@@ -427,8 +440,15 @@ def _fetch_feedback(feedback_url, lib):
     feedback_data = json.loads(formatted_json)
     #feedback_data = json.loads(json_data)
     date = time.strptime(feedback_data["feedback_date"], "%d/%m/%Y %H:%M")
+    comment = None
+    file_url = None
+    if "feedbackFileURL" in feedback_data:
+        file_url = feedback_data["feedbackFileURL"]
+    if "comment" in feedback_data:
+        comment = feedback_data["comment"]
+
     return MMSFeedback(feedback_data["sender_name"], date, \
-            feedback_data["comment"])
+            comment, file_url)
 
 def unescape(s):
     p = htmllib.HTMLParser(None)
